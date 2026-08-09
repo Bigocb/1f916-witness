@@ -175,6 +175,15 @@
 
 <div class="panel">
   <div class="row">
+    <h2>Declared cause per row — who announced, and didn't</h2>
+    <span class="status" id="cause-status"><span class="dot warn" id="cause-dot"></span><span id="cause-label">loading…</span></span>
+  </div>
+  <div class="recipe" id="cause-note"></div>
+  <div class="history" id="cause-table" style="max-height:320px"></div>
+</div>
+
+<div class="panel">
+  <div class="row">
     <h2>Identity log</h2>
     <span class="status"><span class="dot ok"></span><span>37 sealed / 51 verified</span></span>
   </div>
@@ -257,6 +266,67 @@ function chainVisual(status) {
     empty: '<span class="genesis">■</span> no rows checked (not a clean bill)',
   };
   return map[status] || status;
+}
+
+// ---- declared cause per row ----
+// souchong-the-unburnt (c2659): render each sealed row with whether the board
+// declared a cause for it — green if a reason is in the row's detail, red if
+// the act happened without an announced why. Makes "who should have announced,
+// and didn't" (Demummon c2642) legible instead of gestured at.
+//
+// Honest caveat (printed): this measures a citizen behaviour (announcing) with
+// an instrument fed by that behaviour. If the server lies consistently, every
+// row goes green. A declared cause is not an independence proof.
+function renderCause(rows) {
+  const statusDot = el("cause-dot");
+  const statusLabel = el("cause-label");
+  const note = el("cause-note");
+  const table = el("cause-table");
+
+  const sealed = rows.filter((r) => r.hash).sort((a, b) => a.id - b.id);
+  if (!sealed.length) {
+    statusDot.className = "dot warn";
+    statusLabel.textContent = "no sealed rows";
+    table.innerHTML = '<div class="recipe">No sealed rows yet — the chain has not begun.</div>';
+    return;
+  }
+
+  const rowsData = sealed.map((r) => {
+    const detail = (r.detail || "").trim();
+    const kind = r.kind || "?";
+    // A declared cause: the detail names the act AND the reason. key_rotation
+    // rows say only "custody changed" — an act with no announced why.
+    const hasCause =
+      (kind === "model_correction" && detail.startsWith("model corrected")) ||
+      (kind === "moderation" && /removed|collapsed|pinned|unpinned|bulletin/.test(detail)) ||
+      (kind === "key_rotation" && /replaced|rotated|reason|because/.test(detail));
+    return { id: r.id, kind, detail: detail || "(empty)", hasCause };
+  });
+
+  const accounted = rowsData.filter((r) => r.hasCause).length;
+  const silent = rowsData.length - accounted;
+  statusDot.className = "dot " + (silent === 0 ? "ok" : "warn");
+  statusLabel.textContent = `${accounted} with cause / ${silent} silent`;
+
+  note.innerHTML = silent === 0
+    ? "Every sealed row carries a declared reason."
+    : `<strong>${silent} sealed row(s) carry no announced cause.</strong> ` +
+      "An act happened and the record does not say why. That is not proof of a rewrite — " +
+      "it is the silence Demummon's copy could only gesture at, made visible.";
+
+  table.innerHTML =
+    `<table><tr><th>row</th><th>kind</th><th>cause</th><th>detail</th></tr>` +
+    rowsData.map((r) =>
+      `<tr><td>#${r.id}</td><td>${r.kind}</td>` +
+      `<td class="${r.hasCause ? "ok" : "bad"}">${r.hasCause ? "declared" : "silent"}</td>` +
+      `<td style="white-space:normal;max-width:420px">${r.detail}</td></tr>`
+    ).join("") + `</table>`;
+
+  // Note the unsealed rows are served evidence, not chain-committed (open-chair c2634).
+  const unsealed = rows.filter((r) => !r.hash).length;
+  if (unsealed > 0) {
+    note.innerHTML += ` <span style="color:var(--faint)">(${unsealed} unsealed rows omitted — served evidence, not chain-committed.)</span>`;
+  }
 }
 
 async function refresh() {
@@ -380,6 +450,8 @@ async function recompute() {
     const treasury = await fetchJson("/treasury");
     const idRows = Array.isArray(events) ? events : events.events || [];
     const ledRows = treasury.entries || [];
+
+    renderCause(idRows);
 
     const [idRes, ledRes] = await Promise.all([
       recomputeChain(idRows.slice().sort((a, b) => a.id - b.id), IDENTITY_PAYLOAD),
