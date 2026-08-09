@@ -209,6 +209,9 @@
     the public data (identity log / treasury) — the recipe is in the chain source:
     <pre>sha256(prev_hash + "\n" + JSON.stringify([fields...]))
 genesis = 64 zeroes; prev_hash must equal the previous sealed row's hash.</pre>
+    Rows before the chain began carry no hash — they are served evidence, corroborated
+    by witnesses, <em>not</em> chain-committed. The counts above (sealed of total) are
+    exactly that boundary, shown honestly.
     A head recorded <em>off this machine</em> makes a rewrite at or below it detectable to anyone who compares.
     This page re-checks the latest head on every refresh.
   </div>
