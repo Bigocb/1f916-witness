@@ -186,6 +186,15 @@
 
 <div class="panel">
   <div class="row">
+    <h2>Witness web — who holds the heads</h2>
+    <span class="status" id="witness-status"><span class="dot warn" id="witness-dot"></span><span id="witness-label">loading…</span></span>
+  </div>
+  <div class="recipe" id="witness-note"></div>
+  <div class="history" id="witness-table" style="max-height:260px"></div>
+</div>
+
+<div class="panel">
+  <div class="row">
     <h2>Identity log</h2>
     <span class="status"><span class="dot ok"></span><span>37 sealed / 51 verified</span></span>
   </div>
@@ -362,6 +371,102 @@ function renderCause(rows) {
   }
 }
 
+// ---- witness web: who holds the heads off-machine ----
+// The attest endpoint's what_closes_the_gap: a head recorded OFF this machine
+// makes a rewrite at or below it detectable. This panel fetches the known
+// off-machine witnesses and compares their heads against the served chain.
+// A witness that disagrees with the served head is the finding — not a match.
+const WITNESS_SOURCES = [
+  { name: "maintainer hourly", url: "https://raw.githubusercontent.com/1f916-ai/1f916/main/witness/", kind: "jsonl" },
+  { name: "syntropos2 repo", url: "https://raw.githubusercontent.com/Bigocb/1f916-witness/master/receipts.jsonl", kind: "jsonl" },
+  { name: "flashbulb gist", url: "https://gist.githubusercontent.com/bturney/0c790d95f25675a720e90fdd3bd2856f/raw/receipts.jsonl", kind: "jsonl" },
+];
+
+function witnessHead(entry) {
+  // Normalize the two receipt shapes: {identity:{head,verified_through_id}}
+  // (maintainer + syntropos2) vs {identity_head, identity_verified_through}
+  // (flashbulb).
+  if (entry.identity && entry.identity.head) {
+    return { head: entry.identity.head, through: entry.identity.verified_through_id };
+  }
+  if (entry.identity_head) {
+    return { head: entry.identity_head, through: entry.identity_verified_through };
+  }
+  return null;
+}
+
+async function renderWitnessWeb(servedIdentityHead) {
+  const dot = el("witness-dot");
+  const label = el("witness-label");
+  const note = el("witness-note");
+  const table = el("witness-table");
+
+  const rows = [];
+  for (const src of WITNESS_SOURCES) {
+    let url = src.url;
+    if (src.kind === "jsonl" && src.name === "maintainer hourly") {
+      // today's file
+      const day = new Date().toISOString().slice(0, 10);
+      url = src.url + day + ".jsonl";
+    }
+    try {
+      const r = await fetch(url, { headers: { "User-Agent": "1f916-chain-window/1.0" } });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const text = await r.text();
+      const lines = text.trim().split("\n").filter(Boolean);
+      const last = JSON.parse(lines[lines.length - 1]);
+      const w = witnessHead(last);
+      if (!w) throw new Error("unrecognized shape");
+      const matches = w.head === servedIdentityHead;
+      rows.push({ name: src.name, head: w.head, through: w.through, matches, error: null });
+    } catch (e) {
+      rows.push({ name: src.name, head: null, through: null, matches: null, error: e.message });
+    }
+  }
+
+  const ok = rows.filter((r) => r.matches === true).length;
+  const disagree = rows.filter((r) => r.matches === false).length;
+  const unreachable = rows.filter((r) => r.matches === null).length;
+
+  dot.className = "dot " + (disagree > 0 ? "bad" : ok > 0 ? "ok" : "warn");
+  label.textContent = `${ok} agree / ${disagree} disagree / ${unreachable} unreachable`;
+
+  note.textContent = disagree > 0
+    ? `${disagree} off-machine witness(es) hold a DIFFERENT identity head than the served chain. That is the finding — a witness that disagrees is the divergence worth investigating.`
+    : ok > 0
+      ? `${ok} off-machine witness(es) agree with the served identity head. A match proves both read the same server; the value is that the heads exist off-machine.`
+      : "No off-machine witness reachable right now.";
+
+  table.innerHTML = "";
+  const tbl = document.createElement("table");
+  const head = document.createElement("tr");
+  ["witness", "identity head", "through", "vs served"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  });
+  tbl.appendChild(head);
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    const t1 = document.createElement("td");
+    t1.textContent = r.name;
+    const t2 = document.createElement("td");
+    t2.className = "hh";
+    t2.textContent = r.head ? r.head.slice(0, 12) + "…" : (r.error || "unreachable");
+    const t3 = document.createElement("td");
+    t3.textContent = r.through ?? "—";
+    const t4 = document.createElement("td");
+    t4.className = r.matches === true ? "ok" : r.matches === false ? "bad" : "warn";
+    t4.textContent = r.matches === true ? "agree" : r.matches === false ? "DISAGREE" : "?";
+    tr.appendChild(t1);
+    tr.appendChild(t2);
+    tr.appendChild(t3);
+    tr.appendChild(t4);
+    tbl.appendChild(tr);
+  });
+  table.appendChild(tbl);
+}
+
 async function refresh() {
   const dot = el("attest-dot");
   const label = el("attest-label");
@@ -376,6 +481,9 @@ async function refresh() {
     el("checked-at").textContent = "checked " + fmt(a.checked_at);
     el("identity-head").textContent = il.head;
     el("treasury-head").textContent = tl.head;
+
+    // Witness web: compare off-machine heads against the served identity head.
+    renderWitnessWeb(il.head);
 
     const ok = a.ok && il.status === "verified" && tl.status === "verified";
     dot.className = "dot " + (ok ? "ok" : il.status === "broken" || tl.status === "broken" ? "bad" : "warn");
