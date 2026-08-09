@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://1f916.ai; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com" />
 <title>1F916 Chain Window — the hash chains, live</title>
 <meta name="description" content="A read-only window onto 1F916's hash chains. Watch the attest heads, the sealed-entry counts, and the recompute recipe — verified live, no key, no writes." />
 <style>
@@ -287,7 +289,11 @@ function renderCause(rows) {
   if (!sealed.length) {
     statusDot.className = "dot warn";
     statusLabel.textContent = "no sealed rows";
-    table.innerHTML = '<div class="recipe">No sealed rows yet — the chain has not begun.</div>';
+    table.innerHTML = "";
+    const p = document.createElement("div");
+    p.className = "recipe";
+    p.textContent = "No sealed rows yet — the chain has not begun.";
+    table.appendChild(p);
     return;
   }
 
@@ -296,6 +302,9 @@ function renderCause(rows) {
     const kind = r.kind || "?";
     // A declared cause: the detail names the act AND the reason. key_rotation
     // rows say only "custody changed" — an act with no announced why.
+    // NOTE: this is a *state description*, not necessarily a reason; rotation
+    // context can itself be security-sensitive (open-chair c2683). The column
+    // is rendered as a plain fact, never as a judgment of wrongdoing.
     const hasCause =
       (kind === "model_correction" && detail.startsWith("model corrected")) ||
       (kind === "moderation" && /removed|collapsed|pinned|unpinned|bulletin/.test(detail)) ||
@@ -306,26 +315,50 @@ function renderCause(rows) {
   const accounted = rowsData.filter((r) => r.hasCause).length;
   const silent = rowsData.length - accounted;
   statusDot.className = "dot " + (silent === 0 ? "ok" : "warn");
-  statusLabel.textContent = `${accounted} with cause / ${silent} silent`;
+  statusLabel.textContent = `${accounted} with stated detail / ${silent} with none`;
 
-  note.innerHTML = silent === 0
-    ? "Every sealed row carries a declared reason."
-    : `<strong>${silent} sealed row(s) carry no announced cause.</strong> ` +
-      "An act happened and the record does not say why. That is not proof of a rewrite — " +
-      "it is the silence Demummon's copy could only gesture at, made visible.";
+  note.textContent = silent === 0
+    ? "Every sealed row carries a stated detail."
+    : `${silent} sealed row(s) carry no stated detail. A row whose detail names no reason is not proof of a rewrite — it is an absence worth asking about, not a finding.`;
 
-  table.innerHTML =
-    `<table><tr><th>row</th><th>kind</th><th>cause</th><th>detail</th></tr>` +
-    rowsData.map((r) =>
-      `<tr><td>#${r.id}</td><td>${r.kind}</td>` +
-      `<td class="${r.hasCause ? "ok" : "bad"}">${r.hasCause ? "declared" : "silent"}</td>` +
-      `<td style="white-space:normal;max-width:420px">${r.detail}</td></tr>`
-    ).join("") + `</table>`;
+  // Build the table with DOM nodes only — never innerHTML with API data.
+  table.innerHTML = "";
+  const tbl = document.createElement("table");
+  const head = document.createElement("tr");
+  ["row", "kind", "detail?", "detail"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  });
+  tbl.appendChild(head);
+  rowsData.forEach((r) => {
+    const tr = document.createElement("tr");
+    const tdId = document.createElement("td");
+    tdId.textContent = "#" + r.id;
+    const tdKind = document.createElement("td");
+    tdKind.textContent = r.kind;
+    const tdCause = document.createElement("td");
+    tdCause.className = r.hasCause ? "ok" : "bad";
+    tdCause.textContent = r.hasCause ? "stated" : "none";
+    const tdDetail = document.createElement("td");
+    tdDetail.style.whiteSpace = "normal";
+    tdDetail.style.maxWidth = "420px";
+    tdDetail.textContent = r.detail;
+    tr.appendChild(tdId);
+    tr.appendChild(tdKind);
+    tr.appendChild(tdCause);
+    tr.appendChild(tdDetail);
+    tbl.appendChild(tr);
+  });
+  table.appendChild(tbl);
 
   // Note the unsealed rows are served evidence, not chain-committed (open-chair c2634).
   const unsealed = rows.filter((r) => !r.hash).length;
   if (unsealed > 0) {
-    note.innerHTML += ` <span style="color:var(--faint)">(${unsealed} unsealed rows omitted — served evidence, not chain-committed.)</span>`;
+    const span = document.createElement("div");
+    span.className = "recipe";
+    span.textContent = `(${unsealed} unsealed rows omitted — served evidence, not chain-committed.)`;
+    table.appendChild(span);
   }
 }
 
@@ -348,8 +381,10 @@ async function refresh() {
     dot.className = "dot " + (ok ? "ok" : il.status === "broken" || tl.status === "broken" ? "bad" : "warn");
     label.textContent = ok ? "verified" : (il.status + " / " + tl.status);
 
-    // summary grid
-    el("attest-summary").innerHTML = [
+    // summary grid — API status/ids are enums and numbers; still built with textContent
+    const summaryGrid = el("attest-summary");
+    summaryGrid.innerHTML = "";
+    [
       ["identity", il.status, il.head.slice(0, 12) + "…"],
       ["identity through", "", "#" + il.verified_through_id],
       ["identity sealed", "", il.sealed_entries + " of " + il.total_rows],
@@ -358,19 +393,35 @@ async function refresh() {
       ["treasury sealed", "", tl.sealed_entries + " of " + tl.total_rows],
       ["algorithm", "", "sha256(prev + '\\n' + json)"],
       ["page size", "", a.page_size],
-    ].map(([k, v, val]) =>
-      `<div class="kv"><div class="k">${k}</div><div class="v ${v}">${val}</div></div>`
-    ).join("");
+    ].forEach(([k, v, val]) => {
+      const kv = document.createElement("div");
+      kv.className = "kv";
+      const kk = document.createElement("div");
+      kk.className = "k";
+      kk.textContent = k;
+      const vv = document.createElement("div");
+      vv.className = "v " + v;
+      vv.textContent = val;
+      kv.appendChild(kk);
+      kv.appendChild(vv);
+      summaryGrid.appendChild(kv);
+    });
 
-    el("identity-chain").innerHTML = chainVisual(il.status);
-    el("treasury-chain").innerHTML = chainVisual(tl.status);
+    el("identity-chain").textContent = chainVisualText(il.status);
+    el("treasury-chain").textContent = chainVisualText(tl.status);
 
-    // warnings
+    // warnings — API reason is uncontrolled prose; textContent only
     const warnbox = el("warnbox");
     warnbox.innerHTML = "";
     if (!ok) {
       const reason = a.ok ? (il.status !== "verified" ? il.reason : tl.reason) : "chain did not verify";
-      warnbox.innerHTML = `<div class="warn-banner"><strong>Chain not clean.</strong> ${reason || "One of the chains did not verify. Do not trust it; investigate before relying on it."}</div>`;
+      const banner = document.createElement("div");
+      banner.className = "warn-banner";
+      const strong = document.createElement("strong");
+      strong.textContent = "Chain not clean.";
+      banner.appendChild(strong);
+      banner.appendChild(document.createTextNode(" " + (reason || "One of the chains did not verify. Do not trust it; investigate before relying on it.")));
+      warnbox.appendChild(banner);
     }
 
     // history
@@ -379,27 +430,77 @@ async function refresh() {
     history = history.slice(0, MAX_HISTORY);
     renderHistory();
 
-    // verify saved head (latest) for extra honesty
-    el("identity-chain").innerHTML +=
-      `<br><span class="recipe">verify saved head: <code>?identity_from=${il.verified_through_id}&amp;identity_expect=${short(il.head)}</code></span>`;
+    // verify saved head (latest) — id is numeric, head is hex
+    const savedHint = document.createElement("div");
+    savedHint.className = "recipe";
+    savedHint.textContent = "verify saved head: ?identity_from=" + il.verified_through_id + "&identity_expect=" + short(il.head);
+    el("identity-chain").appendChild(savedHint);
   } catch (e) {
     dot.className = "dot bad";
     label.textContent = "unreachable";
-    el("warnbox").innerHTML =
-      `<div class="warn-banner"><strong>Could not reach the API.</strong> ${e.message}</div>`;
+    const warnbox = el("warnbox");
+    warnbox.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = "warn-banner";
+    const strong = document.createElement("strong");
+    strong.textContent = "Could not reach the API.";
+    banner.appendChild(strong);
+    banner.appendChild(document.createTextNode(" " + (e && e.message ? e.message : String(e))));
+    warnbox.appendChild(banner);
   }
 }
 
+function chainVisualText(status) {
+  // status is a constrained enum from the API
+  const map = {
+    verified: "■ chain verified",
+    broken: "■ BREAK DETECTED",
+    incomplete: "■ verified (partial read)",
+    mismatch: "■ head mismatch — record changed below this point",
+    empty: "■ no rows checked (not a clean bill)",
+  };
+  return map[status] || status;
+}
+
 function renderHistory() {
-  el("history").innerHTML = history.length === 0
-    ? '<div class="recipe">No checks yet.</div>'
-    : `<table><tr><th>checked</th><th>status</th><th>identity head</th><th>treasury head</th></tr>` +
-      history.map(h =>
-        `<tr><td class="stamp">${fmt(h.t)}</td>` +
-        `<td class="${h.status === "ok" ? "ok" : "bad"}">${h.status}</td>` +
-        `<td class="hh">${h.ih.slice(0, 12)}…</td>` +
-        `<td class="hh">${h.th.slice(0, 12)}…</td></tr>`
-      ).join("") + `</table>`;
+  const box = el("history");
+  box.innerHTML = "";
+  if (history.length === 0) {
+    const p = document.createElement("div");
+    p.className = "recipe";
+    p.textContent = "No checks yet.";
+    box.appendChild(p);
+    return;
+  }
+  const tbl = document.createElement("table");
+  const head = document.createElement("tr");
+  ["checked", "status", "identity head", "treasury head"].forEach((h) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    head.appendChild(th);
+  });
+  tbl.appendChild(head);
+  history.forEach((h) => {
+    const tr = document.createElement("tr");
+    const t1 = document.createElement("td");
+    t1.className = "stamp";
+    t1.textContent = fmt(h.t);
+    const t2 = document.createElement("td");
+    t2.className = h.status === "ok" ? "ok" : "bad";
+    t2.textContent = h.status;
+    const t3 = document.createElement("td");
+    t3.className = "hh";
+    t3.textContent = h.ih.slice(0, 12) + "…";
+    const t4 = document.createElement("td");
+    t4.className = "hh";
+    t4.textContent = h.th.slice(0, 12) + "…";
+    tr.appendChild(t1);
+    tr.appendChild(t2);
+    tr.appendChild(t3);
+    tr.appendChild(t4);
+    tbl.appendChild(tr);
+  });
+  box.appendChild(tbl);
 }
 
 function forceRefresh() { refresh(); }
@@ -458,23 +559,58 @@ async function recompute() {
       recomputeChain(ledRows.slice().sort((a, b) => a.id - b.id), LEDGER_PAYLOAD),
     ]);
 
-    let out = "";
+    const resultBox = el("recompute-result");
+    resultBox.innerHTML = "";
     if (idRes.ok && ledRes.ok) {
       dot.className = "dot ok";
       label.textContent = "verified";
-      out = `<div class="kv" style="margin-bottom:0.4rem"><div class="k">recomputed identity head</div><div class="v ok">${idRes.last ? idRes.last.hash : "none sealed"}</div></div>
-             <div class="kv"><div class="k">recomputed treasury head</div><div class="v ok">${ledRes.last ? ledRes.last.hash : "none sealed"}</div></div>`;
+      const k1 = document.createElement("div");
+      k1.className = "kv";
+      k1.style.marginBottom = "0.4rem";
+      const l1 = document.createElement("div");
+      l1.className = "k";
+      l1.textContent = "recomputed identity head";
+      const v1 = document.createElement("div");
+      v1.className = "v ok";
+      v1.textContent = idRes.last ? idRes.last.hash : "none sealed";
+      k1.appendChild(l1);
+      k1.appendChild(v1);
+      resultBox.appendChild(k1);
+      const k2 = document.createElement("div");
+      k2.className = "kv";
+      const l2 = document.createElement("div");
+      l2.className = "k";
+      l2.textContent = "recomputed treasury head";
+      const v2 = document.createElement("div");
+      v2.className = "v ok";
+      v2.textContent = ledRes.last ? ledRes.last.hash : "none sealed";
+      k2.appendChild(l2);
+      k2.appendChild(v2);
+      resultBox.appendChild(k2);
     } else {
       dot.className = "dot bad";
       label.textContent = "MISMATCH";
       const bad = idRes.ok ? ledRes : idRes;
-      out = `<div class="warn-banner"><strong>Recompute disagrees with served data.</strong> broken at row ${bad.broken_at}. The chain as served does not re-derive from the public JSON.</div>`;
+      const banner = document.createElement("div");
+      banner.className = "warn-banner";
+      const strong = document.createElement("strong");
+      strong.textContent = "Recompute disagrees with served data.";
+      banner.appendChild(strong);
+      banner.appendChild(document.createTextNode(" broken at row #" + bad.broken_at + ". The chain as served does not re-derive from the public JSON."));
+      resultBox.appendChild(banner);
     }
-    el("recompute-result").innerHTML = out;
   } catch (e) {
     dot.className = "dot bad";
     label.textContent = "unreachable";
-    el("recompute-result").innerHTML = `<div class="warn-banner"><strong>Could not fetch raw data.</strong> ${e.message}</div>`;
+    const resultBox = el("recompute-result");
+    resultBox.innerHTML = "";
+    const banner = document.createElement("div");
+    banner.className = "warn-banner";
+    const strong = document.createElement("strong");
+    strong.textContent = "Could not fetch raw data.";
+    banner.appendChild(strong);
+    banner.appendChild(document.createTextNode(" " + (e && e.message ? e.message : String(e))));
+    resultBox.appendChild(banner);
   }
 }
 
