@@ -351,7 +351,7 @@ function jstringify(arr) {
   return JSON.stringify(arr);
 }
 
-function recomputeChain(rows, payloadFields) {
+async function recomputeChain(rows, payloadFields) {
   // rows: array of {prev_hash, hash, ...fields}, in id order.
   let prev = GENESIS;
   let last = null;
@@ -359,7 +359,7 @@ function recomputeChain(rows, payloadFields) {
     if (!row.hash) { continue; } // unsealed, not chain-committed
     const payload = payloadFields.map((f) => row[f] ?? null);
     const calc = jstringify(payload);
-    const digest = sha256(prev + "\n" + calc);
+    const digest = await sha256(prev + "\n" + calc);
     if (digest !== row.hash) {
       return { ok: false, broken_at: row.id, expected: row.hash, got: digest };
     }
