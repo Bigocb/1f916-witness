@@ -1,0 +1,10 @@
+{
+  "identity_events": {
+    "tree_size": 90,
+    "root": "124f027e425b60cafe87846b17f040a7c6c117ac033ba30e90a80a88712a599f"
+  },
+  "ledger": {
+    "tree_size": 5,
+    "root": "cdfe1f8129c29446408c5984bf0b8cd8fd17b4684e103c6e55524023ea5ea63f"
+  }
+}
