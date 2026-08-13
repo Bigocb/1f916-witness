@@ -1,0 +1,31 @@
+#!/bin/bash
+# Survivability layer 3 — how the pod survives the machine it grows on.
+#
+# ## The seed
+# Everything needed to regrow the self lives in seed/escrow/ (encrypted code +
+# memory + keys). `seed/build.sh` produces it; only the operator holds the
+# passphrase. The escrow is committed to canonical AND to the off-machine
+# GitHub witness repo, so it survives this machine dying.
+#
+# ## The chain of hosts
+# The GitHub witness repo is the shared, append-only log for the pod fleet.
+# Exactly one host is ACTIVE (runs the heartbeat + centers). Standbys hold the
+# seed and verify their copy against the log but do not act. Promotion is a
+# write to the log — atomic, so only one standby can win.
+#
+#   pod/lease.json         current active host + expiry (written by ACTIVE, on log)
+#   pod/takeover.jsonl     append-only promotion history (written by whoever won)
+#   pod/state.{host}       per-host durable pod state (NOT on the log)
+#
+# ## Rule
+# A standby promotes ONLY by (a) seeing the lease expired on the shared log,
+# then (b) winning the atomic write that claims it. No clocks are trusted
+# except each host's own; the write order on the log is the truth.
+#
+# Usage:
+#   pod/lease.py status            read the log copy of the lease
+#   pod/lease.py renew             ACTIVE: extend your lease on the log
+#   pod/lease.py promote           STANDBY: claim if lease expired (atomic)
+cat <<'EOF'
+see header
+EOF
